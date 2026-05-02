@@ -2,13 +2,14 @@
 utils/formatter.py — Emoji-rich Telegram message formatting
 """
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+WIB = timezone(timedelta(hours=7))
+HL_SCAN = "https://hypurrscan.io/address"
 
 
 def ts() -> str:
-    from datetime import timezone, timedelta
-    wib = timezone(timedelta(hours=7))
-    return datetime.now(wib).strftime("%H:%M:%S WIB")
+    return datetime.now(WIB).strftime("%H:%M:%S WIB")
 
 
 def fmt_usd(value: float) -> str:
@@ -27,16 +28,23 @@ def fmt_num(value: float, decimals: int = 2) -> str:
     return f"{value:.{decimals}f}"
 
 
+def addr_link(address: str) -> str:
+    """Return a Telegram markdown link for an address."""
+    if not address or address == "Unknown":
+        return "Unknown"
+    short = f"{address[:6]}...{address[-4:]}"
+    return f"[{short}]({HL_SCAN}/{address})"
+
+
 def liquidation_alert(address: str, account_value: float, positions: list, leverage_type: str) -> str:
     pos_lines = ""
-    for p in positions[:5]:  # max 5 positions shown
+    for p in positions[:5]:
         side = "Long 🟢" if float(p.get("szi", 0)) > 0 else "Short 🔴"
         pos_lines += f"\n  • {p.get('coin', '?')} {side} — {fmt_usd(abs(float(p.get('szi', 0))) * float(p.get('px', 0)))}"
 
-    short_addr = f"{address[:6]}...{address[-4:]}"
     return (
         f"🚨 *LIQUIDATION ALERT*\n"
-        f"Address: `{short_addr}`\n"
+        f"Address: {addr_link(address)}\n"
         f"Account Value: *{fmt_usd(account_value)}*\n"
         f"Type: {leverage_type}\n"
         f"Positions:{pos_lines}\n"
@@ -46,26 +54,25 @@ def liquidation_alert(address: str, account_value: float, positions: list, lever
 
 def twap_alert(coin: str, side: str, notional: float, address: str, duration_min: int) -> str:
     side_emoji = "🟢 BUY" if side.upper() in ("B", "BUY", "LONG") else "🔴 SELL"
-    short_addr = f"{address[:6]}...{address[-4:]}" if address else "Unknown"
     return (
         f"📊 *LARGE TWAP DETECTED*\n"
         f"Coin: *{coin}*\n"
         f"Side: {side_emoji}\n"
         f"Notional: *{fmt_usd(notional)}*\n"
         f"Duration: {duration_min} min\n"
-        f"By: `{short_addr}`\n"
+        f"By: {addr_link(address)}\n"
         f"🕐 {ts()}"
     )
 
 
 def deployment_alert(token_name: str, token_address: str, deployer: str, token_type: str) -> str:
-    short_deployer = f"{deployer[:6]}...{deployer[-4:]}" if deployer else "Unknown"
     emoji = "🪙" if token_type.lower() == "spot" else "📈"
+    deployer_line = f"Deployer: {addr_link(deployer)}\n" if deployer else ""
     return (
         f"{emoji} *NEW {token_type.upper()} DEPLOYMENT*\n"
         f"Token: *{token_name}*\n"
-        f"Address: `{token_address}`\n"
-        f"Deployer: `{short_deployer}`\n"
+        f"Address: {addr_link(token_address)}\n"
+        f"{deployer_line}"
         f"🕐 {ts()}"
     )
 
@@ -83,14 +90,13 @@ def oi_spike_alert(coin: str, old_oi: float, new_oi: float, pct: float) -> str:
 
 def large_perp_trade_alert(coin: str, side: str, notional: float, price: float, address: str) -> str:
     side_emoji = "🟢 LONG" if side.upper() in ("B", "BUY", "LONG") else "🔴 SHORT"
-    short_addr = f"{address[:6]}...{address[-4:]}" if address else "Unknown"
     return (
         f"🐋 *LARGE PERP POSITION*\n"
         f"Coin: *{coin}*\n"
         f"Side: {side_emoji}\n"
         f"Notional: *{fmt_usd(notional)}*\n"
         f"Price: ${price:,.2f}\n"
-        f"By: `{short_addr}`\n"
+        f"By: {addr_link(address)}\n"
         f"🕐 {ts()}"
     )
 
@@ -129,12 +135,11 @@ def hype_spike_alert(price_now: float, price_before: float, pct: float, window_m
 
 def hype_staking_alert(action: str, amount: float, address: str) -> str:
     emoji = "🔒" if action == "stake" else "🔓"
-    short_addr = f"{address[:6]}...{address[-4:]}" if address else "Unknown"
     return (
         f"{emoji} *HYPE STAKING MOVEMENT*\n"
         f"Action: *{action.upper()}*\n"
         f"Amount: *{fmt_num(amount)} HYPE*\n"
-        f"By: `{short_addr}`\n"
+        f"By: {addr_link(address)}\n"
         f"🕐 {ts()}"
     )
 
@@ -147,11 +152,10 @@ def whale_alert(address: str, label: str, event_type: str, amount: float, detail
         "large_trade": "🐳",
     }
     emoji = emoji_map.get(event_type, "🔔")
-    short_addr = f"{address[:6]}...{address[-4:]}"
     return (
         f"{emoji} *WHALE ALERT — {event_type.upper()}*\n"
         f"Label: *{label}*\n"
-        f"Address: `{short_addr}`\n"
+        f"Address: {addr_link(address)}\n"
         f"Amount: *{fmt_usd(amount)}*\n"
         f"{details}\n"
         f"🕐 {ts()}"
