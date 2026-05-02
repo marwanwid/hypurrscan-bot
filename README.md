@@ -17,8 +17,8 @@ Telegram bot yang memonitor Hyperliquid 24/7 dan mengirimkan notifikasi real-tim
 | 🔒 HYPE Staking | Stake/unstake >100K HYPE |
 | 📥 Whale Deposit | Watchlist address deposit >$100K |
 | 📤 Whale Withdraw | Watchlist address withdraw >$100K |
-| 📋 Fees Digest | 24H protocol fees (setiap 6 jam) |
-| 📋 TWAP Digest | Active TWAP >$500K (setiap 6 jam) |
+| 📋 Fees Digest | 24H protocol fees (setiap 1 jam) |
+| 📋 TWAP Digest | Active TWAP >$500K (setiap 1 jam) |
 
 ## 🚀 Quick Setup
 
