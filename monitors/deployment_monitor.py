@@ -1,6 +1,6 @@
 """
 monitors/deployment_monitor.py
-Detects new spot and perp token deployments on Hyperliquid.
+Deteksi token spot dan perp (HIP-3) baru via official HL API.
 """
 
 from typing import Set
@@ -21,34 +21,22 @@ class DeploymentMonitor(BaseMonitor):
     async def tick(self):
         await self._check_spot()
         await self._check_perp()
+        if not self._initialized:
+            self._initialized = True
+            self.logger.info(
+                f"Deployment baseline: {len(self._seen_spot)} spot, "
+                f"{len(self._seen_perp)} perp"
+            )
 
     async def _check_spot(self):
-        """Check for new spot token deployments."""
-        data = await self.hypurrscan_get("/deployments", params={"type": "spot", "limit": 30})
-        if data is None:
-            # Fallback: official HL spotMeta
-            resp = await self.hl_post({"type": "spotMeta"})
-            if resp:
-                tokens = resp.get("tokens", [])
-                for token in tokens:
-                    token_id = str(token.get("index") or token.get("tokenId") or token.get("name", ""))
-                    if not token_id:
-                        continue
-                    if not self._initialized:
-                        self._seen_spot.add(token_id)
-                        continue
-                    if token_id not in self._seen_spot:
-                        self._seen_spot.add(token_id)
-                        name = token.get("name", "Unknown")
-                        address = token.get("evmContract") or ""
-                        msg = deployment_alert(name, address, "", "SPOT")
-                        await self.grouper.add("New Deployments", msg)
-                        self.logger.info(f"New SPOT token: {name}")
+        resp = await self.hl_post({"type": "spotMeta"})
+        if not resp or not isinstance(resp, dict):
             return
 
-        items = data if isinstance(data, list) else data.get("data", data.get("deployments", []))
-        for item in items:
-            token_id = str(item.get("id") or item.get("tokenId") or item.get("address") or item.get("txHash", ""))
+        for token in resp.get("tokens", []):
+            if not isinstance(token, dict):
+                continue
+            token_id = str(token.get("index") or token.get("name") or "")
             if not token_id:
                 continue
             if not self._initialized:
@@ -56,21 +44,23 @@ class DeploymentMonitor(BaseMonitor):
                 continue
             if token_id not in self._seen_spot:
                 self._seen_spot.add(token_id)
-                name = item.get("name") or item.get("tokenName") or "Unknown"
-                address = item.get("address") or item.get("tokenAddress") or ""
-                deployer = item.get("deployer") or item.get("user") or ""
-                msg = deployment_alert(name, address, deployer, "SPOT")
+                name = token.get("name", "Unknown")
+                address = token.get("evmContract") or token.get("tokenId") or ""
+                msg = deployment_alert(name, str(address), "", "SPOT")
                 await self.grouper.add("New Deployments", msg)
-                self.logger.info(f"New SPOT deployment: {name}")
+                self.logger.info(f"New SPOT token: {name}")
 
     async def _check_perp(self):
-        """Check for new perp deployments via HIP-3."""
         resp = await self.hl_post({"type": "perpDexs"})
+        # Fix: handle None response gracefully
         if not resp:
             return
 
-        dexs = resp if isinstance(resp, list) else resp.get("perpDexs", [])
+        dexs = resp if isinstance(resp, list) else resp.get("perpDexs", []) if isinstance(resp, dict) else []
+
         for dex in dexs:
+            if not isinstance(dex, dict):
+                continue
             dex_id = str(dex.get("dexId") or dex.get("name") or "")
             if not dex_id:
                 continue
@@ -83,8 +73,4 @@ class DeploymentMonitor(BaseMonitor):
                 deployer = dex.get("deployer") or ""
                 msg = deployment_alert(name, dex_id, deployer, "PERP (HIP-3)")
                 await self.grouper.add("New Deployments", msg)
-                self.logger.info(f"New PERP/HIP-3 deployment: {name}")
-
-        if not self._initialized:
-            self._initialized = True
-            self.logger.info(f"Deployment baseline set: {len(self._seen_spot)} spot, {len(self._seen_perp)} perp")
+                self.logger.info(f"New PERP deployment: {name}")

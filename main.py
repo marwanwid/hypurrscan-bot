@@ -1,5 +1,6 @@
 """
 Hyperliquid Monitor Bot — Main Entry Point
+Fixed for Python 3.12+ / 3.14 (no implicit event loop)
 """
 
 import asyncio
@@ -30,14 +31,19 @@ logging.basicConfig(
 logger = logging.getLogger("main")
 
 
-def build_application() -> Application:
-    return Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+async def main():
+    storage = Storage()
+    grouper = AlertGrouper()
 
+    app = (
+        Application.builder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .build()
+    )
+    app.bot_data["storage"] = storage
+    app.bot_data["grouper"] = grouper
 
-async def post_init(application: Application) -> None:
-    """Called after the bot starts — launch all monitors as background tasks."""
-    storage: Storage = application.bot_data["storage"]
-    grouper: AlertGrouper = application.bot_data["grouper"]
+    register_commands(app)
 
     monitors = [
         LiquidationMonitor(grouper),
@@ -51,34 +57,39 @@ async def post_init(application: Application) -> None:
         TWAPDigestScheduler(grouper),
     ]
 
-    for monitor in monitors:
-        asyncio.create_task(monitor.run(), name=monitor.__class__.__name__)
-        logger.info(f"✅ Started: {monitor.__class__.__name__}")
-
-    # Start the alert grouper flush loop
-    asyncio.create_task(
-        grouper.flush_loop(application.bot),
-        name="AlertGrouper",
-    )
-    logger.info("✅ Started: AlertGrouper")
-    logger.info("🚀 All monitors running!")
-
-
-def main() -> None:
-    storage = Storage()
-    grouper = AlertGrouper()
-
-    app = build_application()
-    app.bot_data["storage"] = storage
-    app.bot_data["grouper"] = grouper
-
-    register_commands(app)
-
-    app.post_init = post_init
-
     logger.info("🤖 Hyperliquid Monitor Bot starting...")
-    app.run_polling(drop_pending_updates=True)
+
+    async with app:
+        await app.start()
+        await app.updater.start_polling(drop_pending_updates=True)
+        logger.info("✅ Telegram polling started")
+
+        tasks = []
+        for monitor in monitors:
+            task = asyncio.create_task(monitor.run(), name=monitor.__class__.__name__)
+            tasks.append(task)
+            logger.info(f"✅ Started: {monitor.__class__.__name__}")
+
+        tasks.append(
+            asyncio.create_task(grouper.flush_loop(app.bot), name="AlertGrouper")
+        )
+        logger.info("✅ Started: AlertGrouper")
+        logger.info("🚀 All monitors running!")
+
+        try:
+            await asyncio.Event().wait()
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            logger.info("🛑 Shutdown signal received...")
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        await app.updater.stop()
+        await app.stop()
+
+    logger.info("👋 Bot stopped.")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
