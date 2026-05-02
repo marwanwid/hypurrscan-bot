@@ -6,7 +6,9 @@ from datetime import datetime
 
 
 def ts() -> str:
-    return datetime.utcnow().strftime("%H:%M:%S UTC")
+    from datetime import timezone, timedelta
+    wib = timezone(timedelta(hours=7))
+    return datetime.now(wib).strftime("%H:%M:%S WIB")
 
 
 def fmt_usd(value: float) -> str:
