@@ -7,7 +7,7 @@ Telegram bot yang memonitor Hyperliquid 24/7 dan mengirimkan notifikasi real-tim
 | Feature | Trigger |
 |---------|---------|
 | 💀 Liquidation Alert | Liquidasi address > $1M |
-| 📊 TWAP Alert | TWAP baru > $1M notional |
+| 📊 TWAP Alert | TWAP baru > $1M notional (via WebSocket) |
 | 🪙 Deployment Alert | Token spot/perp baru deploy |
 | 📉 OI Spike | Open Interest naik/turun >20% dalam 5 menit |
 | 🐋 Large Perp Trade | Posisi perp dibuka >$10M |
@@ -34,9 +34,8 @@ Telegram bot yang memonitor Hyperliquid 24/7 dan mengirimkan notifikasi real-tim
 
 ### 3. Clone & Setup
 ```bash
-git clone <your-repo>
-cd hyperliquid-bot
-
+git clone https://github.com/marwanwid/hypurrscan-bot.git
+cd hypurrscan-bot
 cp .env.example .env
 # Edit .env dan isi TELEGRAM_BOT_TOKEN dan TELEGRAM_CHAT_ID
 ```
@@ -51,23 +50,12 @@ python main.py
 
 ## 🚂 Deploy ke Railway
 
-### Option A: Via GitHub (Recommended)
-1. Push code ke GitHub repo baru
-2. Buka [railway.app](https://railway.app) → New Project → Deploy from GitHub
-3. Pilih repo lu
-4. Pergi ke **Variables** tab, tambahkan:
+1. Buka [railway.app](https://railway.app) → Login with GitHub
+2. New Project → Deploy from GitHub repo → pilih `hypurrscan-bot`
+3. Pergi ke tab **Variables**, tambahkan:
    - `TELEGRAM_BOT_TOKEN` = token dari BotFather
    - `TELEGRAM_CHAT_ID` = chat ID group lu
-5. Railway auto-deploy! ✅
-
-### Option B: Via Railway CLI
-```bash
-npm install -g @railway/cli
-railway login
-railway init
-railway up
-railway variables set TELEGRAM_BOT_TOKEN=xxx TELEGRAM_CHAT_ID=xxx
-```
+4. Railway auto-deploy ✅
 
 ## 🤖 Bot Commands
 
@@ -82,58 +70,17 @@ railway variables set TELEGRAM_BOT_TOKEN=xxx TELEGRAM_CHAT_ID=xxx
 
 ## ⚙️ Konfigurasi Threshold
 
-Edit `.env` atau set sebagai Railway environment variable:
+Edit `.env` atau set di Railway environment variables:
 
 ```env
 LIQUIDATION_THRESHOLD_USD=1000000    # Alert liquidasi >$1M
-PERP_POSITION_THRESHOLD_USD=10000000 # Alert perp trade >$10M  
+PERP_POSITION_THRESHOLD_USD=10000000 # Alert perp trade >$10M
 SPOT_TRADE_THRESHOLD_USD=1000000     # Alert spot trade >$1M
 HYPE_PRICE_STEP=5                    # Alert tiap $5 milestone
 HYPE_SPIKE_PERCENT=5                 # Alert kalau HYPE spike >5%
-HYPE_SPIKE_WINDOW_MINUTES=15         # Window untuk spike detection
+HYPE_SPIKE_WINDOW_MINUTES=15         # Window spike detection
 HYPE_STAKE_THRESHOLD=100000          # Alert stake/unstake >100K HYPE
+FEES_DIGEST_HOURS=6                  # Kirim fees digest tiap 6 jam
 ```
 
 ## 🏗️ Architecture
-
-```
-main.py                  ← Entry point (PTB Application)
-config.py                ← All settings from .env
-├── bot/
-│   └── commands.py      ← Telegram commands
-├── monitors/
-│   ├── liquidation_monitor.py   ← HypurrScan API poll (30s)
-│   ├── twap_monitor.py          ← HypurrScan API poll (60s)
-│   ├── deployment_monitor.py    ← HL API poll (60s)
-│   ├── oi_monitor.py            ← HL API poll (5min)
-│   ├── trade_monitor.py         ← WebSocket real-time
-│   ├── hype_monitor.py          ← WebSocket + 60s poll
-│   └── whale_monitor.py         ← HL API poll (60s)
-├── schedulers/
-│   ├── fees_scheduler.py        ← Every 6 hours
-│   └── twap_digest_scheduler.py ← Every 6 hours
-└── utils/
-    ├── grouper.py       ← Alert bundler (30s window)
-    ├── formatter.py     ← Message formatting
-    └── storage.py       ← Wallet watchlist persistence
-```
-
-## 📝 Notes
-
-- **HypurrScan API**: Bot uses `api.hypurrscan.io`. Jika ada endpoint yang berubah, adjust di `monitors/` files
-- **Alert Grouping**: Alerts dibundle tiap 30 detik. Banyak event dalam 30 detik → 1 notif
-- **Data persistence**: Wallet watchlist disimpan di `data/wallets.json` (Railway persistent volume atau local)
-- **Railway Free Tier**: Cukup untuk bot ini karena hanya butuh 1 dyno/worker
-
-## 🐛 Troubleshooting
-
-**Bot tidak send notif:**
-- Cek `TELEGRAM_CHAT_ID` sudah benar (pastikan bot sudah di-add ke group sebagai admin)
-- Cek logs Railway untuk error
-
-**HypurrScan API error:**
-- API mungkin berubah endpoint — cek `api.hypurrscan.io/ui/` untuk docs terbaru
-- Bot akan fallback ke Hyperliquid official API
-
-**WebSocket disconnect:**
-- Bot auto-reconnect tiap 10-15 detik kalau WebSocket putus

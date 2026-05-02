@@ -14,7 +14,6 @@ import websockets
 
 from config import (
     HL_WS_URL,
-    HL_API_URL,
     PERP_POSITION_THRESHOLD_USD,
     SPOT_TRADE_THRESHOLD_USD,
 )
@@ -23,14 +22,12 @@ from utils.grouper import AlertGrouper
 
 logger = logging.getLogger(__name__)
 
-# Top perp coins to monitor (extend as needed)
 TOP_PERP_COINS = [
     "BTC", "ETH", "SOL", "BNB", "AVAX", "MATIC", "ARB", "OP",
     "DOGE", "LINK", "UNI", "AAVE", "SUI", "APT", "TIA",
     "HYPE", "kPEPE", "WIF", "BONK", "JTO",
 ]
 
-# Top spot coins on Hyperliquid
 TOP_SPOT_COINS = ["HYPE", "PURR", "JEFF", "POINTS"]
 
 
@@ -58,13 +55,11 @@ class TradeMonitor:
         ) as ws:
             logger.info("WebSocket connected")
 
-            # Subscribe to trades for top perp coins
             for coin in TOP_PERP_COINS:
                 sub = {"method": "subscribe", "subscription": {"type": "trades", "coin": coin}}
                 await ws.send(json.dumps(sub))
-                await asyncio.sleep(0.05)  # small delay to avoid overwhelming
+                await asyncio.sleep(0.05)
 
-            # Subscribe to spot trades
             for coin in TOP_SPOT_COINS:
                 sub = {"method": "subscribe", "subscription": {"type": "trades", "coin": f"@{coin}"}}
                 await ws.send(json.dumps(sub))
@@ -116,7 +111,6 @@ class TradeMonitor:
                     await self.grouper.add("Large Perp Position", msg)
                     logger.info(f"Large PERP trade: {display_coin} ${notional:,.0f}")
 
-        # Prevent seen_tids from growing too large
         if len(self._seen_tids) > 10000:
             tids = list(self._seen_tids)
             self._seen_tids = set(tids[-5000:])
