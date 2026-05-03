@@ -39,15 +39,21 @@ def register_commands(app: Application):
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🚀 *Hyperliquid Monitor Bot is running!*\n\n"
-        "I'm watching Hyperliquid 24/7 for:\n"
-        "• 💀 Liquidations > $1M\n"
-        "• 📊 Large TWAPs > $1M\n"
-        "• 🪙 New token deployments\n"
-        "• 📉 OI spikes > 20%\n"
-        "• 🐋 Large trades\n"
-        "• 💜 HYPE price milestones\n"
-        "• 🔒 HYPE staking movements\n\n"
-        "Use /help for all commands.",
+        "Monitoring Hyperliquid 24/7 untuk:\n\n"
+        "*Real-time alerts:*\n"
+        "• 🚨 Liquidation completed >$100K\n"
+        "• 📊 Large TWAP order >$1M\n"
+        "• 🐋 Large perp trade >$1M\n"
+        "• 💰 Large spot trade >$1M\n"
+        "• 🪙 New token deployment\n"
+        "• 📉 OI spike >20%\n"
+        "• 💜 HYPE price milestone (tiap $5)\n"
+        "• ⚡ HYPE spike/dump >5% dalam 15 menit\n"
+        "• 🔒 HYPE stake/unstake >100K\n"
+        "• 🐳 Whale watchlist (deposit/withdraw/liq >$100K)\n\n"
+        "*Scheduled:*\n"
+        "• 📊 24H Fees Digest (tiap 1 jam)\n\n"
+        "Ketik /help untuk semua commands.",
         parse_mode="Markdown",
     )
 
@@ -62,18 +68,25 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"✅ *Bot Status: Running*\n\n"
-        f"*Active Monitors:*\n"
-        f"• 🚨 Liquidation Monitor (30s poll)\n"
-        f"• 📊 TWAP Monitor (60s poll)\n"
-        f"• 🪙 Deployment Monitor (60s poll)\n"
-        f"• 📉 OI Spike Monitor (5min poll)\n"
-        f"• 🐋 Trade Monitor (WebSocket)\n"
-        f"• 💜 HYPE Monitor (WebSocket + 60s)\n"
-        f"• 🔔 Whale Monitor ({wallet_count} wallets, 60s poll)\n\n"
+        f"*Real-time Monitors (WebSocket):*\n"
+        f"• 🚨 Liquidation Monitor — semua perp\n"
+        f"• 📊 TWAP Monitor — semua pair\n"
+        f"• 🐋 Trade Monitor — semua perp + spot\n"
+        f"• 💜 HYPE Price Monitor\n"
+        f"• 📈 Order Monitor — BTC >$5M, ETH >$3M, lain >$1M\n\n"
+        f"*Poll-based Monitors:*\n"
+        f"• 🪙 Deployment Monitor (60s)\n"
+        f"• 📉 OI Spike Monitor (5 menit)\n"
+        f"• 🔒 HYPE Staking Monitor (30s)\n"
+        f"• 🐳 Whale Watchlist ({wallet_count} wallets, 60s)\n\n"
         f"*Schedulers:*\n"
-        f"• 📋 24H Fees Digest (every 6h)\n"
-        f"• 📋 Active TWAP Digest (every 6h)\n\n"
-        f"*Tracked Wallets:* {wallet_count}",
+        f"• 📊 24H Fees Digest (tiap 1 jam)\n\n"
+        f"*Tracked Wallets:* {wallet_count}\n\n"
+        f"*Thresholds:*\n"
+        f"• Liquidation: >$100K\n"
+        f"• TWAP: >$1M\n"
+        f"• Perp/Spot trade: >$1M\n"
+        f"• HYPE staking: >100K HYPE",
         parse_mode="Markdown",
     )
 
@@ -85,8 +98,8 @@ async def cmd_add_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         await update.message.reply_text(
             "Usage: `/addwallet <address> [label]`\n\n"
-            "Example:\n"
-            "`/addwallet 0xabc123... MyWhale`",
+            "Contoh:\n"
+            "`/addwallet 0xabc123... BigWhale`",
             parse_mode="Markdown",
         )
         return
@@ -95,7 +108,7 @@ async def cmd_add_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     label = " ".join(args[1:]) if len(args) > 1 else None
 
     if not address.startswith("0x") or len(address) < 10:
-        await update.message.reply_text("❌ Invalid address format. Must start with 0x")
+        await update.message.reply_text("❌ Format address salah. Harus diawali 0x")
         return
 
     added = storage.add_wallet(address, label)
@@ -103,14 +116,17 @@ async def cmd_add_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if added:
         await update.message.reply_text(
-            f"✅ Wallet added to watchlist!\n"
+            f"✅ Wallet ditambahkan ke watchlist!\n"
             f"Address: `{short}`\n"
             f"Label: *{label or 'Unnamed'}*\n\n"
-            f"I'll alert on deposits/withdrawals/liquidations.",
+            f"Bot akan alert kalau ada deposit/withdraw/liquidasi >$100K.",
             parse_mode="Markdown",
         )
     else:
-        await update.message.reply_text(f"⚠️ Wallet `{short}` is already in the watchlist.", parse_mode="Markdown")
+        await update.message.reply_text(
+            f"⚠️ Wallet `{short}` sudah ada di watchlist.",
+            parse_mode="Markdown",
+        )
 
 
 async def cmd_remove_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -118,7 +134,10 @@ async def cmd_remove_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
 
     if not args:
-        await update.message.reply_text("Usage: `/removewallet <address>`", parse_mode="Markdown")
+        await update.message.reply_text(
+            "Usage: `/removewallet <address>`",
+            parse_mode="Markdown",
+        )
         return
 
     address = args[0].lower()
@@ -126,9 +145,15 @@ async def cmd_remove_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     short = f"{address[:6]}...{address[-4:]}"
 
     if removed:
-        await update.message.reply_text(f"✅ Removed `{short}` from watchlist.", parse_mode="Markdown")
+        await update.message.reply_text(
+            f"✅ `{short}` dihapus dari watchlist.",
+            parse_mode="Markdown",
+        )
     else:
-        await update.message.reply_text(f"❌ Wallet `{short}` not found in watchlist.", parse_mode="Markdown")
+        await update.message.reply_text(
+            f"❌ Wallet `{short}` tidak ditemukan di watchlist.",
+            parse_mode="Markdown",
+        )
 
 
 async def cmd_wallets(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -137,7 +162,8 @@ async def cmd_wallets(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not wallets:
         await update.message.reply_text(
-            "📋 No wallets tracked yet.\n\nUse `/addwallet <address> [label]` to add one.",
+            "📋 Belum ada wallet yang ditrack.\n\n"
+            "Gunakan `/addwallet <address> [label]` untuk menambah.",
             parse_mode="Markdown",
         )
         return

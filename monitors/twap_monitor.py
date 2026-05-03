@@ -12,7 +12,7 @@ from typing import Set
 import aiohttp
 import websockets
 
-from config import HL_API_URL, HL_WS_URL, TWAP_ALERT_THRESHOLD_USD, TWAP_DIGEST_THRESHOLD_USD
+from config import HL_API_URL, HL_WS_URL, TWAP_ALERT_THRESHOLD_USD
 from utils.formatter import twap_alert
 from utils.grouper import AlertGrouper
 
