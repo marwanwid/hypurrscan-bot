@@ -45,16 +45,19 @@ async def main():
 
     register_commands(app)
 
+    # Init TWAPMonitor dulu supaya bisa di-share ke TWAPDigestScheduler
+    twap_monitor = TWAPMonitor(grouper)
+
     monitors = [
         LiquidationMonitor(grouper),
-        TWAPMonitor(grouper),
+        twap_monitor,
         DeploymentMonitor(grouper),
         OIMonitor(grouper),
         TradeMonitor(grouper),
         HypeMonitor(grouper),
         WhaleMonitor(grouper, storage),
         FeesScheduler(grouper),
-        TWAPDigestScheduler(grouper),
+        TWAPDigestScheduler(grouper, twap_monitor=twap_monitor),  # pass reference
     ]
 
     logger.info("🤖 Hyperliquid Monitor Bot starting...")
