@@ -63,7 +63,7 @@ class OrderMonitor:
         ws.register("trades", self._handle_trade)
 
         log.info(f"OrderMonitor ready — "
-                 f"BTC >$5M, others >$1M, confirm delay {CONFIRM_DELAY}s")
+                 f"BTC >$5M, ETH >$3M, others >$1M, confirm delay {CONFIRM_DELAY}s")
 
     async def subscribe_all_coins(self):
         """Subscribe ke semua perp coins dari HL meta API."""
