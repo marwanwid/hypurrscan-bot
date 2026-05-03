@@ -37,17 +37,21 @@ def addr_link(address: str) -> str:
 
 
 def liquidation_alert(address: str, account_value: float, positions: list, leverage_type: str) -> str:
+    # Kalau leverage_type berisi info coin & side (dari liquidation baru)
+    # format lebih simple
     pos_lines = ""
     for p in positions[:5]:
-        side = "Long 🟢" if float(p.get("szi", 0)) > 0 else "Short 🔴"
-        pos_lines += f"\n  • {p.get('coin', '?')} {side} — {fmt_usd(abs(float(p.get('szi', 0))) * float(p.get('px', 0)))}"
+        side_str = "Long 🔴" if float(p.get("szi", 0)) > 0 else "Short 🟢"
+        val = abs(float(p.get("szi", 0))) * float(p.get("px", 0))
+        if val > 0:
+            pos_lines += f"\n  • {p.get('coin', '?')} {side_str} — {fmt_usd(val)}"
 
     return (
         f"🚨 *LIQUIDATION ALERT*\n"
         f"Address: {addr_link(address)}\n"
-        f"Account Value: *{fmt_usd(account_value)}*\n"
-        f"Type: {leverage_type}\n"
-        f"Positions:{pos_lines}\n"
+        f"Value: *{fmt_usd(account_value)}*\n"
+        f"Detail: {leverage_type}\n"
+        f"{pos_lines}\n"
         f"🕐 {ts()}"
     )
 
