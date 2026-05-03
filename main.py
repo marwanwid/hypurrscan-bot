@@ -1,6 +1,5 @@
 """
 Hyperliquid Monitor Bot — Main Entry Point
-Fixed for Python 3.12+ / 3.14 (no implicit event loop)
 """
 
 import asyncio
@@ -20,10 +19,10 @@ from monitors.oi_monitor import OIMonitor
 from monitors.trade_monitor import TradeMonitor
 from monitors.hype_monitor import HypeMonitor
 from monitors.whale_monitor import WhaleMonitor
-from monitors.order_monitor import OrderMonitor       # ← BARU
+from monitors.order_monitor import OrderMonitor
 from schedulers.fees_scheduler import FeesScheduler
-from api.ws_client import HyperliquidWS               # ← BARU
-import db.database as db                              # ← BARU
+from api.ws_client import HyperliquidWS
+import db.database as db
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,11 +35,8 @@ logger = logging.getLogger("main")
 async def main():
     storage = Storage()
     grouper = AlertGrouper()
+    ws      = HyperliquidWS()
 
-    # ── Init shared WebSocket client ────────────────────────────────────────
-    ws = HyperliquidWS()
-
-    # ── Init in-memory database (dedup + wallet list) ───────────────────────
     db.init_db(storage)
 
     app = (
@@ -53,15 +49,9 @@ async def main():
 
     register_commands(app)
 
-    # Init TWAPMonitor dulu supaya bisa di-share ke TWAPDigestScheduler
-    twap_monitor = TWAPMonitor(grouper)
-
-    # Init OrderMonitor — butuh shared WS dan bot instance
-    order_monitor = OrderMonitor(ws, app.bot)
-
     monitors = [
         LiquidationMonitor(grouper),
-        twap_monitor,
+        TWAPMonitor(grouper),
         DeploymentMonitor(grouper),
         OIMonitor(grouper),
         TradeMonitor(grouper),
@@ -77,32 +67,24 @@ async def main():
         await app.updater.start_polling(drop_pending_updates=True)
         logger.info("✅ Telegram polling started")
 
-        # Subscribe OrderMonitor ke semua coins sebelum WS jalan
+        # FIX: Init OrderMonitor SETELAH app.start() supaya bot sudah ready
+        order_monitor = OrderMonitor(ws, app.bot)
         await order_monitor.subscribe_all_coins()
 
         tasks = []
 
-        # ── Task: shared WebSocket (untuk OrderMonitor) ──────────────────
-        tasks.append(
-            asyncio.create_task(ws.run(), name="HyperliquidWS")
-        )
-        logger.info("✅ Started: HyperliquidWS (shared)")
+        tasks.append(asyncio.create_task(ws.run(), name="HyperliquidWS"))
+        logger.info("✅ Started: HyperliquidWS")
 
-        # ── Task: OrderMonitor pending processor ─────────────────────────
-        tasks.append(
-            asyncio.create_task(order_monitor.run(), name="OrderMonitor")
-        )
+        tasks.append(asyncio.create_task(order_monitor.run(), name="OrderMonitor"))
         logger.info("✅ Started: OrderMonitor")
 
-        # ── Tasks: semua monitor lain ─────────────────────────────────────
         for monitor in monitors:
             task = asyncio.create_task(monitor.run(), name=monitor.__class__.__name__)
             tasks.append(task)
             logger.info(f"✅ Started: {monitor.__class__.__name__}")
 
-        tasks.append(
-            asyncio.create_task(grouper.flush_loop(app.bot), name="AlertGrouper")
-        )
+        tasks.append(asyncio.create_task(grouper.flush_loop(app.bot), name="AlertGrouper"))
         logger.info("✅ Started: AlertGrouper")
         logger.info("🚀 All monitors running!")
 
