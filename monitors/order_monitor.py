@@ -3,7 +3,7 @@ monitors/order_monitor.py
 Gabungan WS trades + REST konfirmasi untuk detect:
 - Open Long / Open Short
 - Close Long / Close Short
-Threshold: BTC >$5M, semua lain >$1M
+Threshold: BTC >$5M, ETH >$3M, semua lain >$1M
 """
 import asyncio
 import logging
@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 # Threshold per coin
 BTC_THRESHOLD     = 5_000_000   # $5M
+ETH_THRESHOLD     = 3_000_000   # $3M
 DEFAULT_THRESHOLD = 1_000_000   # $1M
 
 # Seberapa lama tunggu konfirmasi REST setelah WS trade
@@ -34,6 +35,8 @@ WINDOW_SECONDS = 600  # 10 menit
 def get_threshold(coin: str) -> float:
     if coin == "BTC":
         return BTC_THRESHOLD
+    elif coin == "ETH":
+        return ETH_THRESHOLD
     return DEFAULT_THRESHOLD
 
 
