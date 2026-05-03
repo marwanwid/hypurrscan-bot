@@ -21,7 +21,6 @@ from monitors.trade_monitor import TradeMonitor
 from monitors.hype_monitor import HypeMonitor
 from monitors.whale_monitor import WhaleMonitor
 from schedulers.fees_scheduler import FeesScheduler
-from schedulers.twap_digest_scheduler import TWAPDigestScheduler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -57,7 +56,6 @@ async def main():
         HypeMonitor(grouper),
         WhaleMonitor(grouper, storage),
         FeesScheduler(grouper),
-        TWAPDigestScheduler(grouper, twap_monitor=twap_monitor),  # pass reference
     ]
 
     logger.info("🤖 Hyperliquid Monitor Bot starting...")
