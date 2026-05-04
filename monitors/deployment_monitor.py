@@ -1,6 +1,7 @@
 """
 monitors/deployment_monitor.py
-Deteksi token spot dan perp (HIP-3) baru via official HL API.
+Deteksi token spot dan perp HIP-3 baru via official HL API.
+HIP-3 perp muncul di metaAndAssetCtxs universe dengan prefix xyz:, cash:, vntl:, dll
 """
 
 from typing import Set
@@ -20,12 +21,12 @@ class DeploymentMonitor(BaseMonitor):
 
     async def tick(self):
         await self._check_spot()
-        await self._check_perp()
+        await self._check_perp_hip3()
         if not self._initialized:
             self._initialized = True
             self.logger.info(
                 f"Deployment baseline: {len(self._seen_spot)} spot, "
-                f"{len(self._seen_perp)} perp"
+                f"{len(self._seen_perp)} perp/HIP-3"
             )
 
     async def _check_spot(self):
@@ -50,27 +51,45 @@ class DeploymentMonitor(BaseMonitor):
                 await self.grouper.add("New Deployments", msg)
                 self.logger.info(f"New SPOT token: {name}")
 
-    async def _check_perp(self):
-        resp = await self.hl_post({"type": "perpDexs"})
-        # Fix: handle None response gracefully
-        if not resp:
+    async def _check_perp_hip3(self):
+        """
+        HIP-3 perp markets muncul di universe metaAndAssetCtxs.
+        Mereka punya nama dengan prefix seperti xyz:ZM, cash:CAR, vntl:SOY, dll.
+        Semua yang bukan nama plain (ada titik/colon) = HIP-3 market.
+        """
+        resp = await self.hl_post({"type": "metaAndAssetCtxs"})
+        if not resp or not isinstance(resp, list) or len(resp) < 1:
             return
 
-        dexs = resp if isinstance(resp, list) else resp.get("perpDexs", []) if isinstance(resp, dict) else []
+        universe = resp[0].get("universe", [])
 
-        for dex in dexs:
-            if not isinstance(dex, dict):
+        for asset in universe:
+            if not isinstance(asset, dict):
                 continue
-            dex_id = str(dex.get("dexId") or dex.get("name") or "")
-            if not dex_id:
+
+            name = asset.get("name", "")
+            if not name:
                 continue
+
+            # Semua perp di universe — track semuanya untuk detect baru
+            asset_id = name  # name sudah unik
+
             if not self._initialized:
-                self._seen_perp.add(dex_id)
+                self._seen_perp.add(asset_id)
                 continue
-            if dex_id not in self._seen_perp:
-                self._seen_perp.add(dex_id)
-                name = dex.get("name") or dex_id
-                deployer = dex.get("deployer") or ""
-                msg = deployment_alert(name, dex_id, deployer, "PERP (HIP-3)")
-                await self.grouper.add("New Deployments", msg)
-                self.logger.info(f"New PERP deployment: {name}")
+
+            if asset_id not in self._seen_perp:
+                self._seen_perp.add(asset_id)
+
+                # Tentukan apakah HIP-3 (ada prefix dengan colon) atau perp biasa
+                if ":" in name:
+                    # HIP-3 market: xyz:ZM, cash:CAR, vntl:SOY, dll
+                    deployer = asset.get("deployer") or ""
+                    msg = deployment_alert(name, "", deployer, "PERP HIP-3")
+                    await self.grouper.add("New Deployments", msg)
+                    self.logger.info(f"New HIP-3 perp: {name}")
+                else:
+                    # Perp baru yang ditambah Hyperliquid official
+                    msg = deployment_alert(name, "", "", "PERP")
+                    await self.grouper.add("New Deployments", msg)
+                    self.logger.info(f"New official perp: {name}")
