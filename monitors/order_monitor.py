@@ -120,6 +120,9 @@ class OrderMonitor:
             except Exception as e:
                 log.debug(f"OrderMonitor trade parse: {e}")
 
+        if len(self._alerted) > 10000:
+            self._alerted = set(list(self._alerted)[-5000:])
+
     async def _process_pending(self):
         now = time.time()
         still_pending = []

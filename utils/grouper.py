@@ -7,7 +7,7 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Callable
+from typing import List
 
 from config import ALERT_GROUP_WINDOW_SECONDS, TELEGRAM_CHAT_ID
 
