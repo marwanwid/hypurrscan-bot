@@ -1,12 +1,13 @@
 """
 monitors/deployment_monitor.py
 Deteksi token spot dan perp HIP-3 baru via official HL API.
-HIP-3 perp muncul di metaAndAssetCtxs universe dengan prefix xyz:, cash:, vntl:, dll
 """
 
 from typing import Set
 
-from config import POLL_DEPLOYMENT_SEC
+import aiohttp
+
+from config import POLL_DEPLOYMENT_SEC, HL_API_URL
 from monitors.base import BaseMonitor
 from utils.formatter import deployment_alert
 from utils.grouper import AlertGrouper
@@ -52,11 +53,6 @@ class DeploymentMonitor(BaseMonitor):
                 self.logger.info(f"New SPOT token: {name}")
 
     async def _check_perp_hip3(self):
-        """
-        HIP-3 perp markets muncul di universe metaAndAssetCtxs.
-        Mereka punya nama dengan prefix seperti xyz:ZM, cash:CAR, vntl:SOY, dll.
-        Semua yang bukan nama plain (ada titik/colon) = HIP-3 market.
-        """
         resp = await self.hl_post({"type": "metaAndAssetCtxs"})
         if not resp or not isinstance(resp, list) or len(resp) < 1:
             return
@@ -71,8 +67,7 @@ class DeploymentMonitor(BaseMonitor):
             if not name:
                 continue
 
-            # Semua perp di universe — track semuanya untuk detect baru
-            asset_id = name  # name sudah unik
+            asset_id = name
 
             if not self._initialized:
                 self._seen_perp.add(asset_id)
@@ -81,15 +76,37 @@ class DeploymentMonitor(BaseMonitor):
             if asset_id not in self._seen_perp:
                 self._seen_perp.add(asset_id)
 
-                # Tentukan apakah HIP-3 (ada prefix dengan colon) atau perp biasa
                 if ":" in name:
-                    # HIP-3 market: xyz:ZM, cash:CAR, vntl:SOY, dll
+                    # HIP-3 market — coba fetch auction price
                     deployer = asset.get("deployer") or ""
-                    msg = deployment_alert(name, "", deployer, "PERP HIP-3")
+                    auction_price = await self._get_auction_price(name)
+                    extra = {"auction_price": auction_price} if auction_price else {}
+                    msg = deployment_alert(name, "", deployer, "PERP HIP-3", extra)
                     await self.grouper.add("New Deployments", msg)
                     self.logger.info(f"New HIP-3 perp: {name}")
                 else:
-                    # Perp baru yang ditambah Hyperliquid official
                     msg = deployment_alert(name, "", "", "PERP")
                     await self.grouper.add("New Deployments", msg)
                     self.logger.info(f"New official perp: {name}")
+
+    async def _get_auction_price(self, ticker: str) -> str:
+        """Coba ambil harga auction terakhir untuk HIP-3 ticker."""
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.post(
+                    HL_API_URL,
+                    json={"type": "perpDexAuctions"}
+                ) as resp:
+                    if resp.status != 200:
+                        return ""
+                    data = await resp.json()
+                    if not isinstance(data, list):
+                        return ""
+                    for auction in data:
+                        if auction.get("name") == ticker or auction.get("ticker") == ticker:
+                            price = auction.get("auctionPrice") or auction.get("price") or ""
+                            if price:
+                                return f"{float(price):,.2f}"
+        except Exception:
+            pass
+        return ""

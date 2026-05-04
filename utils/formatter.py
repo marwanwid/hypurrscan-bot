@@ -69,16 +69,51 @@ def twap_alert(coin: str, side: str, notional: float, address: str, duration_min
     )
 
 
-def deployment_alert(token_name: str, token_address: str, deployer: str, token_type: str) -> str:
-    emoji = "🪙" if token_type.lower() == "spot" else "📈"
-    deployer_line = f"Deployer: {addr_link(deployer)}\n" if deployer else ""
-    return (
-        f"{emoji} *NEW {token_type.upper()} DEPLOYMENT*\n"
-        f"Token: *{token_name}*\n"
-        f"Address: {addr_link(token_address)}\n"
-        f"{deployer_line}"
-        f"🕐 {ts()}"
-    )
+def deployment_alert(token_name: str, token_address: str, deployer: str, token_type: str, extra: dict = None) -> str:
+    extra = extra or {}
+
+    if "HIP-3" in token_type.upper() or "PERP HIP" in token_type.upper():
+        # Parse namespace dan ticker dari nama seperti xyz:IHSG
+        if ":" in token_name:
+            namespace, ticker = token_name.split(":", 1)
+        else:
+            namespace, ticker = "hl", token_name
+
+        deployer_line = f"Deployer: {addr_link(deployer)}\n" if deployer else ""
+        auction_line = f"Auction Price: *{extra.get('auction_price', '')} HYPE*\n" if extra.get('auction_price') else ""
+
+        return (
+            f"📈 *NEW HIP-3 PERP DEPLOYMENT*\n"
+            f"Ticker: *{token_name}*\n"
+            f"Namespace: `{namespace}`\n"
+            f"Market: *{ticker}-USDC*\n"
+            f"{deployer_line}"
+            f"{auction_line}"
+            f"🔗 [Lihat di Hyperliquid](https://app.hyperliquid.xyz/trade/{ticker})\n"
+            f"🕐 {ts()}"
+        )
+
+    elif token_type.upper() == "PERP":
+        return (
+            f"📈 *NEW PERP LISTING*\n"
+            f"Ticker: *{token_name}*\n"
+            f"Market: *{token_name}-USDC*\n"
+            f"🔗 [Lihat di Hyperliquid](https://app.hyperliquid.xyz/trade/{token_name})\n"
+            f"🕐 {ts()}"
+        )
+
+    else:
+        # SPOT
+        deployer_line = f"Deployer: {addr_link(deployer)}\n" if deployer else ""
+        address_line = f"Address: {addr_link(token_address)}\n" if token_address else ""
+        return (
+            f"🪙 *NEW SPOT DEPLOYMENT*\n"
+            f"Token: *{token_name}*\n"
+            f"{address_line}"
+            f"{deployer_line}"
+            f"🔗 [Lihat di Hyperliquid](https://app.hyperliquid.xyz/spot/{token_name})\n"
+            f"🕐 {ts()}"
+        )
 
 
 def oi_spike_alert(coin: str, old_oi: float, new_oi: float, pct: float) -> str:
