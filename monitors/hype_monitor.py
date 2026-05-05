@@ -3,7 +3,7 @@ monitors/hype_monitor.py
 Monitors HYPE token:
   - Price milestone alerts every $5
   - Rapid spike/dump alert
-  - Staking movement alert via delegator history
+  - Staking movement alert via validatorSummaries delta tracking
 """
 
 import asyncio
@@ -36,8 +36,9 @@ class HypeMonitor:
         self._current_price: Optional[float] = None
         self._alerted_levels: Set = set()
         self._price_history: deque = deque(maxlen=500)
-        self._last_stake_snapshot: dict = {}
-        self._seen_staking_txs: Set[str] = set()
+        # Staking: track total stake per validator
+        self._prev_validator_stakes: dict = {}  # validator_addr -> total_stake
+        self._initialized_staking: bool = False
 
     async def run(self):
         logger.info("HypeMonitor started")
@@ -109,9 +110,9 @@ class HypeMonitor:
                 self._alerted_levels.add(cooldown_key)
                 msg = hype_spike_alert(current_price, baseline_price, pct_change, HYPE_SPIKE_WINDOW_MINUTES)
                 await self.grouper.add("HYPE Spike", msg)
-                logger.info(f"HYPE spike detected: {pct_change:+.2f}% in {HYPE_SPIKE_WINDOW_MINUTES}min")
+                logger.info(f"HYPE spike: {pct_change:+.2f}% in {HYPE_SPIKE_WINDOW_MINUTES}min")
 
-    # ── Staking via REST poll ────────────────────────────────────────────────
+    # ── Staking via validator total stake delta ───────────────────────────────
 
     async def _staking_poll_loop(self):
         await asyncio.sleep(10)
@@ -120,155 +121,140 @@ class HypeMonitor:
                 await self._check_staking()
             except Exception as e:
                 logger.error(f"Staking poll error: {e}")
-            await asyncio.sleep(30)  # poll tiap 30 detik supaya lebih responsif
+            await asyncio.sleep(30)
 
     async def _check_staking(self):
         """
-        Track perubahan delegation per user per validator.
-        Amount dari API sudah dalam unit HYPE — tidak perlu dibagi desimal.
-        Juga deteksi unstaking queue entries baru.
+        Track total stake per validator dari validatorSummaries.
+        Kalau ada validator yang total stake-nya naik/turun >= HYPE_STAKE_THRESHOLD
+        dalam satu poll window → ada yang stake/unstake besar.
+
+        Catatan: kita tahu berapa HYPE yang di-stake/unstake dan ke validator mana,
+        tapi tidak tahu wallet address spesifik siapa (limitasi API publik HL).
         """
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
-
-                # Step 1: Ambil semua validator
-                async with session.post(HL_API_URL, json={"type": "validatorSummaries"}) as resp:
+                async with session.post(
+                    HL_API_URL,
+                    json={"type": "validatorSummaries"}
+                ) as resp:
                     if resp.status != 200:
+                        logger.debug(f"validatorSummaries returned {resp.status}")
                         return
                     validators = await resp.json()
 
-                if not isinstance(validators, list):
-                    return
-
-                # Step 2: Untuk setiap validator, ambil delegasi
-                current_snapshot = {}
-                for v in validators:
-                    validator_addr = v.get("validator") or v.get("address") or ""
-                    if not validator_addr:
-                        continue
-
-                    try:
-                        async with session.post(
-                            HL_API_URL,
-                            json={"type": "delegations", "validator": validator_addr}
-                        ) as resp:
-                            if resp.status != 200:
-                                continue
-                            delegations = await resp.json()
-                    except Exception:
-                        continue
-
-                    if not isinstance(delegations, list):
-                        continue
-
-                    for d in delegations:
-                        user_addr = (
-                            d.get("delegator") or
-                            d.get("user") or
-                            d.get("address") or ""
-                        )
-                        # API return amount dalam HYPE langsung, TIDAK pakai desimal
-                        raw_amount = float(
-                            d.get("amount") or
-                            d.get("stake") or
-                            d.get("stakedAmount") or 0
-                        )
-
-                        # Cek apakah perlu dibagi — kalau >1B kemungkinan raw wei
-                        amount = raw_amount / 1_000_000 if raw_amount > 1_000_000_000 else raw_amount
-
-                        if user_addr:
-                            key = f"{user_addr}_{validator_addr}"
-                            current_snapshot[key] = {
-                                "user": user_addr,
-                                "validator": validator_addr,
-                                "amount": amount,
-                            }
-
-                    await asyncio.sleep(0.05)
-
-                # Step 3: Deteksi perubahan
-                if not self._last_stake_snapshot:
-                    self._last_stake_snapshot = current_snapshot
-                    logger.info(f"Staking baseline: {len(current_snapshot)} delegator-validator pairs")
-                    return
-
-                for key, data in current_snapshot.items():
-                    old_data = self._last_stake_snapshot.get(key)
-                    old_amount = old_data["amount"] if old_data else 0.0
-                    new_amount = data["amount"]
-                    delta = new_amount - old_amount
-
-                    if abs(delta) >= HYPE_STAKE_THRESHOLD:
-                        action = "stake" if delta > 0 else "unstake"
-                        msg = hype_staking_alert(action, abs(delta), data["user"])
-                        await self.grouper.add("HYPE Staking", msg)
-                        logger.info(f"Staking: {action} {abs(delta):,.0f} HYPE by {data['user'][:10]}...")
-
-                # Deteksi full unstake (keluar dari list)
-                for key, old_data in self._last_stake_snapshot.items():
-                    if key not in current_snapshot and old_data["amount"] >= HYPE_STAKE_THRESHOLD:
-                        msg = hype_staking_alert("unstake", old_data["amount"], old_data["user"])
-                        await self.grouper.add("HYPE Staking", msg)
-                        logger.info(f"Full unstake: {old_data['amount']:,.0f} HYPE by {old_data['user'][:10]}...")
-
-                self._last_stake_snapshot = current_snapshot
-
-                # Step 4: Cek unstaking queue untuk catch unstake initiations
-                await self._check_unstaking_queue(session)
-
         except Exception as e:
-            logger.error(f"Staking check error: {e}")
+            logger.debug(f"Staking fetch error: {e}")
+            return
 
-    async def _check_unstaking_queue(self, session: aiohttp.ClientSession):
-        """
-        Poll unstaking queue — catch unstake initiations yang belum selesai.
-        """
-        try:
-            # Coba beberapa endpoint yang mungkin ada
-            for endpoint_type in ["unstakingQueue", "pendingUnstakes", "delegatorHistory"]:
-                try:
-                    async with session.post(
-                        HL_API_URL,
-                        json={"type": endpoint_type}
-                    ) as resp:
-                        if resp.status != 200:
-                            continue
-                        data = await resp.json()
+        if not isinstance(validators, list) or len(validators) == 0:
+            return
 
-                        if not isinstance(data, list) or len(data) == 0:
-                            continue
+        # Build current snapshot: validator_addr -> {name, stake}
+        current_stakes = {}
+        for v in validators:
+            addr = v.get("validator") or v.get("address") or ""
+            name = v.get("name") or v.get("moniker") or addr[:10]
 
-                        for entry in data:
-                            # Generate unique ID untuk entry ini
-                            tx_id = str(
-                                entry.get("hash") or
-                                entry.get("id") or
-                                entry.get("txHash") or
-                                f"{entry.get('user', '')}_{entry.get('amount', '')}_{entry.get('time', '')}"
-                            )
+            # Ambil stake — coba berbagai field name
+            raw_stake = (
+                v.get("totalStake") or
+                v.get("stake") or
+                v.get("votingPower") or
+                v.get("stakedAmount") or 0
+            )
+            stake = float(raw_stake)
 
-                            if tx_id in self._seen_staking_txs:
-                                continue
-                            self._seen_staking_txs.add(tx_id)
+            # Auto-detect unit: kalau nilai sangat besar kemungkinan raw (1 HYPE = 1e8 atau 1e6)
+            if stake > 1_000_000_000_000:  # > 1 Triliun → raw dengan 8 desimal
+                stake = stake / 1e8
+            elif stake > 1_000_000_000:    # > 1 Miliar → raw dengan 6 desimal
+                stake = stake / 1e6
 
-                            user_addr = entry.get("user") or entry.get("address") or entry.get("delegator") or ""
-                            raw_amount = float(entry.get("amount") or entry.get("hype") or 0)
-                            amount = raw_amount / 1_000_000 if raw_amount > 1_000_000_000 else raw_amount
+            if addr:
+                current_stakes[addr] = {"name": name, "stake": stake}
 
-                            if amount >= HYPE_STAKE_THRESHOLD and user_addr:
-                                msg = hype_staking_alert("unstake", amount, user_addr)
-                                await self.grouper.add("HYPE Staking", msg)
-                                logger.info(f"Unstake queue: {amount:,.0f} HYPE by {user_addr[:10]}...")
+        if not current_stakes:
+            logger.debug("validatorSummaries returned empty data")
+            return
 
-                        break  # kalau berhasil dapat data, stop coba endpoint lain
+        # First run — set baseline, jangan alert
+        if not self._initialized_staking:
+            self._prev_validator_stakes = current_stakes
+            self._initialized_staking = True
+            logger.info(f"Staking baseline set: {len(current_stakes)} validators, "
+                        f"total staked: {sum(v['stake'] for v in current_stakes.values()):,.0f} HYPE")
+            return
 
-                except Exception:
-                    continue
+        # Compare — detect delta per validator
+        for addr, data in current_stakes.items():
+            prev = self._prev_validator_stakes.get(addr)
+            if prev is None:
+                # Validator baru muncul
+                if data["stake"] >= HYPE_STAKE_THRESHOLD:
+                    await self._send_staking_alert(
+                        action="stake",
+                        amount=data["stake"],
+                        validator_name=data["name"],
+                        validator_addr=addr,
+                    )
+                continue
 
-        except Exception as e:
-            logger.debug(f"Unstaking queue check error: {e}")
+            delta = data["stake"] - prev["stake"]
 
-        # Cleanup seen txs kalau terlalu banyak
-        if len(self._seen_staking_txs) > 5000:
-            self._seen_staking_txs = set(list(self._seen_staking_txs)[-2500:])
+            if abs(delta) >= HYPE_STAKE_THRESHOLD:
+                action = "stake" if delta > 0 else "unstake"
+                await self._send_staking_alert(
+                    action=action,
+                    amount=abs(delta),
+                    validator_name=data["name"],
+                    validator_addr=addr,
+                )
+                logger.info(
+                    f"Staking: {action} {abs(delta):,.0f} HYPE "
+                    f"on validator {data['name']} ({addr[:10]}...)"
+                )
+
+        # Detect validator yang hilang dari list (full unstake semua delegator)
+        for addr, prev_data in self._prev_validator_stakes.items():
+            if addr not in current_stakes and prev_data["stake"] >= HYPE_STAKE_THRESHOLD:
+                await self._send_staking_alert(
+                    action="unstake",
+                    amount=prev_data["stake"],
+                    validator_name=prev_data["name"],
+                    validator_addr=addr,
+                )
+
+        self._prev_validator_stakes = current_stakes
+
+    async def _send_staking_alert(self, action: str, amount: float,
+                                   validator_name: str, validator_addr: str):
+        """Format dan kirim staking alert dengan info validator."""
+        emoji = "🔒" if action == "stake" else "🔓"
+        action_text = "STAKE" if action == "stake" else "UNSTAKE"
+
+        # Format amount
+        if amount >= 1_000_000:
+            amount_str = f"{amount/1_000_000:.2f}M"
+        elif amount >= 1_000:
+            amount_str = f"{amount/1_000:.1f}K"
+        else:
+            amount_str = f"{amount:.0f}"
+
+        short_addr = f"{validator_addr[:6]}...{validator_addr[-4:]}" if validator_addr else "Unknown"
+        validator_link = f"[{short_addr}](https://hypurrscan.io/staking/{validator_addr})"
+
+        from datetime import datetime, timezone, timedelta
+        WIB = timezone(timedelta(hours=7))
+        ts = datetime.now(WIB).strftime("%H:%M:%S WIB")
+
+        text = (
+            f"{emoji} *HYPE STAKING MOVEMENT*\n"
+            f"Action: *{action_text}*\n"
+            f"Amount: *{amount_str} HYPE*\n"
+            f"Validator: *{validator_name}*\n"
+            f"Val Address: {validator_link}\n"
+            f"🕐 {ts}"
+        )
+
+        await self.grouper.add("HYPE Staking", text)
