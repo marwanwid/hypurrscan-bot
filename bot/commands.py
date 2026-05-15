@@ -26,6 +26,17 @@ ADMIN_COMMANDS = """
 _Bot alerts automatically to this chat._
 """
 
+from config import ALLOWED_USER_IDS
+
+async def check_allowed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Return True kalau user boleh akses bot."""
+    if not ALLOWED_USER_IDS:
+        return True  # kalau tidak diset, semua boleh
+    user_id = update.effective_user.id if update.effective_user else None
+    if user_id not in ALLOWED_USER_IDS:
+        await update.message.reply_text("❌ Akses ditolak.")
+        return False
+    return True
 
 def register_commands(app: Application):
     app.add_handler(CommandHandler("start", cmd_start))
@@ -37,6 +48,9 @@ def register_commands(app: Application):
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_allowed(update, context):
+        return
+
     await update.message.reply_text(
         "🚀 *Hyperliquid Monitor Bot is running!*\n\n"
         "Monitoring Hyperliquid 24/7 untuk:\n\n"
@@ -59,12 +73,16 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_allowed(update, context):
+        return
     await update.message.reply_text(ADMIN_COMMANDS, parse_mode="Markdown")
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     storage: Storage = context.bot_data.get("storage")
     wallet_count = len(storage.get_wallets()) if storage else 0
+    if not await check_allowed(update, context):
+        return
 
     await update.message.reply_text(
         f"✅ *Bot Status: Running*\n\n"
@@ -94,6 +112,9 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_add_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     storage: Storage = context.bot_data.get("storage")
     args = context.args
+
+    if not await check_allowed(update, context):
+        return
 
     if not args:
         await update.message.reply_text(
@@ -133,6 +154,9 @@ async def cmd_remove_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     storage: Storage = context.bot_data.get("storage")
     args = context.args
 
+    if not await check_allowed(update, context):
+        return
+
     if not args:
         await update.message.reply_text(
             "Usage: `/removewallet <address>`",
@@ -159,6 +183,9 @@ async def cmd_remove_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_wallets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     storage: Storage = context.bot_data.get("storage")
     wallets = storage.get_wallets()
+
+    if not await check_allowed(update, context):
+        return
 
     if not wallets:
         await update.message.reply_text(

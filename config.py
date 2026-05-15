@@ -7,6 +7,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# ── Access Control ────────────────────────────────────────────────────────────
+ALLOWED_USER_IDS: list = [
+    int(uid.strip()) for uid in os.getenv("ALLOWED_USER_IDS", "").split(",")
+    if uid.strip().isdigit()
+]
+
 # ── Telegram ─────────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN: str = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID: str = os.environ["TELEGRAM_CHAT_ID"]
